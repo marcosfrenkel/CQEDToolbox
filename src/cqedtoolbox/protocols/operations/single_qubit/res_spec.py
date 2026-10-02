@@ -37,6 +37,11 @@ logger = logging.getLogger(__name__)
 _FIT_BOUNDS = {"Q_i": (1e3, 1e7), "Q_e_mag": (1e2, 1e7), "A": (0.0, np.inf)}
 # Below this residual ratio, S and conj(S) fit about equally well and the orientation choice is a coin flip.
 MIN_ORIENTATION_MARGIN = 1.2
+# Hanger resonance-shape acceptance (tuned on q02 OPX data 2026-10-02: real kappa/span 0.10, depth 0.35;
+# background-ripple fits kappa/span >= 0.39, depth <= 0.16 (up to 0.42 under perturbation)).
+MAX_KAPPA_OVER_SPAN = 0.2
+MIN_DIP_DEPTH = 0.2  # Q_l/|Q_e|
+MAX_F0_STDERR_OVER_KAPPA = 0.25
 
 
 class IQOrientation(Enum):
@@ -430,6 +435,11 @@ def _bounded_params(fit_cls, frequencies, signal):
         if value == 0:
             value = 1e-30
         params[name] = lmfit.Parameter(name, value=value, min=lo, max=hi)
+    # HangerResponseBruno.guess seeds the dimensionless transmission_slope with a raw |S|-per-Hz polyfit slope
+    # (~1e-13 at OPX amplitudes). That has no effect on the model and makes the fit covariance singular (no stderr),
+    # so start it at 0 instead.
+    if "transmission_slope" in guess:
+        params["transmission_slope"] = 0.0
     return params, bounds
 
 
@@ -440,6 +450,46 @@ def fit_reliability_problem(ret: "UnwindAndFitRet") -> str | None:
     if ret.at_bound:
         return f"fit at bound: {', '.join(ret.at_bound)}"
     return None
+
+
+def f0_fit_problems(fit_result, frequencies, max_rel_error: float) -> list[str]:
+    """Reasons a resonator fit's f_0 should not be trusted; empty if it can be.
+
+    Hanger fits must look like a resolved resonance: linewidth kappa = f_0/Q_l at most
+    MAX_KAPPA_OVER_SPAN of the swept span, dip depth Q_l/|Q_e| at least MIN_DIP_DEPTH, and
+    stderr(f_0) at most MAX_F0_STDERR_OVER_KAPPA of kappa. This rejects fits to slow background
+    ripple, which a broad, shallow hanger can follow closely.
+
+    TODO: reflection/transmission — shape criteria not defined/tested yet; they keep the old
+    stderr(f_0)/f_0 <= max_rel_error rule (which is nearly always satisfied at GHz frequencies).
+    """
+    p = fit_result.params
+    f0 = p["f_0"]
+    problems = []
+
+    if all(k in p for k in ("Q_i", "Q_e_mag", "theta")):  # hanger
+        freqs = np.asarray(frequencies, dtype=float)
+        span = float(np.max(freqs) - np.min(freqs))
+        q_e = p["Q_e_mag"].value * np.exp(-1j * p["theta"].value)
+        q_l = 1.0 / (1.0 / (1.0 / (1.0 / q_e).real) + 1.0 / p["Q_i"].value)  # as in HangerResponseBruno.model
+        kappa = abs(f0.value / q_l)
+        depth = q_l / abs(p["Q_e_mag"].value)
+        if kappa > MAX_KAPPA_OVER_SPAN * span:
+            problems.append(f"linewidth too wide (kappa/span={kappa / span:.2f} > {MAX_KAPPA_OVER_SPAN:.2f})")
+        if depth < MIN_DIP_DEPTH:
+            problems.append(f"dip too shallow (Ql/|Qe|={depth:.2f} < {MIN_DIP_DEPTH:.2f})")
+        if f0.stderr is None:
+            problems.append("f_0(no stderr)")
+        elif f0.stderr / kappa > MAX_F0_STDERR_OVER_KAPPA:
+            problems.append(f"f_0 stderr/kappa={f0.stderr / kappa:.2f} > {MAX_F0_STDERR_OVER_KAPPA:.2f}")
+        return problems
+
+    if f0.stderr is None:
+        problems.append("f_0(no stderr)")
+    elif f0.value == 0 or abs(f0.stderr / f0.value) > max_rel_error:
+        pct = abs(f0.stderr / f0.value) * 100 if f0.value != 0 else float("inf")
+        problems.append(f"high-error param: f_0({pct:.0f}%)")
+    return problems
 
 
 def _params_at_bound(fit_params, bounds, tol=0.01) -> tuple:
@@ -720,21 +770,11 @@ class ResonatorSpectroscopy(ProtocolOperation):
         threshold = self.snr_threshold()
         snr_passed = self.snr >= threshold
 
-        max_error = self.max_fit_param_error()
-        param = self.fit_result.params["f_0"]
-        bad_param = None
-        if param.stderr is None:
-            bad_param = "f_0(no stderr)"
-        elif param.value == 0 or abs(param.stderr / param.value) > max_error:
-            pct = abs(param.stderr / param.value) * 100 if param.value != 0 else float("inf")
-            bad_param = f"f_0({pct:.0f}%)"
-
-        fit_passed = bad_param is None
-        passed = snr_passed and fit_passed and self.fit_problem is None
+        problems = f0_fit_problems(self.fit_result, self.independents["frequencies"], self.max_fit_param_error())
+        passed = snr_passed and not problems and self.fit_problem is None
 
         parts = [f"SNR={self.snr:.3f} (threshold={threshold:.3f})"]
-        if bad_param:
-            parts.append(f"high-error param: {bad_param}")
+        parts.extend(problems)
         if self.fit_problem:
             parts.append(self.fit_problem)
 

@@ -27,6 +27,7 @@ from cqedtoolbox.protocols.parameters import (
 from cqedtoolbox.protocols.operations.single_qubit.res_spec import (
     ResonatorSpectroscopy,
     SyntheticHangerResonatorData,
+    f0_fit_problems,
     fit_reliability_problem,
 )
 from cqedtoolbox.measurement_lib.opx.advanced.qubit_tuneup import measure_pulse_resonator_spec_vs_readout_amp
@@ -106,6 +107,30 @@ class ResSpecVsGainHighSNRThreshold(CorrectionParameter):
 
     def _opx_setter(self, v):
         self.params.corrections.res_spec_vs_gain.high_snr(v)
+
+
+@dataclass
+class ResSpecVsGainMinPassFraction(CorrectionParameter):
+    name: str = field(default="res_spec_vs_gain_min_pass_fraction", init=False)
+    description: str = field(default="Fraction of the low-gain traces that must pass the quality check", init=False)
+
+    def _qick_getter(self):
+        return self.params.corrections.res_spec_vs_gain.min_pass_fraction()
+
+    def _qick_setter(self, v):
+        self.params.corrections.res_spec_vs_gain.min_pass_fraction(v)
+
+    def _dummy_getter(self):
+        return self.params.corrections.res_spec_vs_gain.min_pass_fraction()
+
+    def _dummy_setter(self, v):
+        self.params.corrections.res_spec_vs_gain.min_pass_fraction(v)
+
+    def _opx_getter(self):
+        return self.params.corrections.res_spec_vs_gain.min_pass_fraction()
+
+    def _opx_setter(self, v):
+        self.params.corrections.res_spec_vs_gain.min_pass_fraction(v)
 
 
 @dataclass
@@ -224,6 +249,7 @@ class ResonatorSpectroscopyVsGain(ProtocolOperation):
             snr_threshold=ResSpecVsGainSNRThreshold(params),
             max_fit_param_error=ResSpecVsGainMaxFitParamError(params),
             high_snr_threshold=ResSpecVsGainHighSNRThreshold(params),
+            min_pass_fraction=ResSpecVsGainMinPassFraction(params),
             repetition_factor=ResSpecVsGainRepetitionFactor(params),
             max_repetition_increases=ResSpecVsGainMaxRepetitionIncreases(params),
         )
@@ -270,13 +296,9 @@ class ResonatorSpectroscopyVsGain(ProtocolOperation):
         if fit_problem:
             return fit_problem
 
-        max_error = self.max_fit_param_error()
-        param = fit_result.params["f_0"]
-        if param.stderr is None:
-            return "f_0: no stderr"
-        if param.value == 0 or abs(param.stderr / param.value) > max_error:
-            pct = abs(param.stderr / param.value) * 100 if param.value != 0 else float("inf")
-            return f"f_0: {pct:.0f}% error"
+        problems = f0_fit_problems(fit_result, freqs, self.max_fit_param_error())
+        if problems:
+            return "; ".join(problems)
 
         return None
 
@@ -392,8 +414,10 @@ class ResonatorSpectroscopyVsGain(ProtocolOperation):
         ax.set_xlabel("Gain")
         ax.set_ylabel("Resonance Frequency (MHz)")
 
-        ax.plot(gains, res_f_arr, marker='.', linestyle='-', label='Data')
-        ax.plot([gains[0], gains[-1]], [res_f_arr[0], res_f_arr[-1]], label='Linear Fit')
+        if len(gains) > 0:
+            ax.plot(gains, res_f_arr, marker='.', linestyle='-', label='Data (passing fits)')
+        if len(gains) >= 2:
+            ax.plot([gains[0], gains[-1]], [res_f_arr[0], res_f_arr[-1]], label='Linear Fit')
         if optimal_gain is not None:
             ax.axvline(x=optimal_gain, linestyle='--', color='red', label='Selected Gain')
         ax.legend()
@@ -487,15 +511,22 @@ class ResonatorSpectroscopyVsGain(ProtocolOperation):
             image_path = ds._new_file_path(ds.savefolders[1], "snr_vs_gain", suffix="png")
             self.figure_paths.append(image_path)
 
-            # Linearity info (kept for the plot and stored data)
-            self.slope = (res_f_arr[-1] - res_f_arr[0]) / (gains[-1] - gains[0])
-            self.deviations = [np.abs(f - (self.slope * (g - gains[0]) + res_f_arr[0]))
-                               for g, f in zip(gains, res_f_arr)]
-            self.max_deviation = max(self.deviations)
+            # Linearity info (kept for the plot and stored data), from traces whose fit passed only
+            valid_gains = np.asarray(gains)[passing_indices]
+            valid_res_f = np.asarray(res_f_arr)[passing_indices]
+            if len(passing_indices) >= 2:
+                self.slope = (valid_res_f[-1] - valid_res_f[0]) / (valid_gains[-1] - valid_gains[0])
+                self.deviations = [np.abs(f - (self.slope * (g - valid_gains[0]) + valid_res_f[0]))
+                                   for g, f in zip(valid_gains, valid_res_f)]
+                self.max_deviation = max(self.deviations)
+            else:
+                self.slope = float("nan")
+                self.deviations = []
+                self.max_deviation = float("nan")
 
             # Create gain vs resonance frequency plot (last)
             gain_vs_freq_fig = self._plot_gain_vs_resonance_frequency(
-                gains, res_f_arr, self.optimal_gain
+                valid_gains, valid_res_f, self.optimal_gain
             )
             ds.add_figure("gain_vs_frequency", fig=gain_vs_freq_fig)
 
@@ -512,17 +543,20 @@ class ResonatorSpectroscopyVsGain(ProtocolOperation):
             )
 
     def _check_low_gain_quality(self) -> CheckResult:
-        """Quality check (SNR + f_0 error) for the first 50% of gain traces."""
+        """At least min_pass_fraction of the first 50% of gain traces must pass the quality check."""
         n_low = max(1, len(self.snr_values) // 2)
+        min_fraction = self.min_pass_fraction()
 
         failures = []
         for i in range(n_low):
             if not self.trace_valid[i]:
                 failures.append(f"trace {i}: {self.trace_invalid_reasons[i]}")
 
-        passed = len(failures) == 0
-        desc = (f"first {n_low} traces pass quality check" if passed
-                else "; ".join(failures))
+        n_pass = n_low - len(failures)
+        passed = n_pass / n_low >= min_fraction
+        desc = f"{n_pass}/{n_low} low-gain traces pass (required fraction {min_fraction:.2f})"
+        if failures:
+            desc += "; " + "; ".join(failures)
         return CheckResult("low_gain_quality_check", passed, desc)
 
     def _check_high_snr(self) -> CheckResult:

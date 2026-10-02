@@ -32,6 +32,7 @@ from cqedtoolbox.measurement_lib.qick.single_transmon_v2 import FreqSweepProgram
 from cqedtoolbox.protocols.operations.single_qubit.res_spec import (
     ResonatorSpectroscopy,
     SyntheticHangerResonatorData,
+    f0_fit_problems,
     fit_reliability_problem,
 )
 
@@ -382,33 +383,26 @@ class ResonatorSpectroscopyAfterPi(ProtocolOperation):
             image_path_combined = ds._new_file_path(ds.savefolders[1], f"{self.name}_combined", suffix="png")
             self.figure_paths.append(image_path_combined)
 
-    def _check_fit_quality(self, snr, fit_result, check_name, fit_problem=None) -> CheckResult:
+    def _check_fit_quality(self, snr, fit_result, freqs, check_name, fit_problem=None) -> CheckResult:
         threshold = self.snr_threshold()
         snr_passed = snr >= threshold
 
-        max_error = self.max_fit_param_error()
-        param = fit_result.params["f_0"]
-        bad_param = None
-        if param.stderr is None:
-            bad_param = "f_0(no stderr)"
-        elif param.value == 0 or abs(param.stderr / param.value) > max_error:
-            pct = abs(param.stderr / param.value) * 100 if param.value != 0 else float("inf")
-            bad_param = f"f_0({pct:.0f}%)"
-
-        passed = snr_passed and bad_param is None and fit_problem is None
+        problems = f0_fit_problems(fit_result, freqs, self.max_fit_param_error())
+        passed = snr_passed and not problems and fit_problem is None
         parts = [f"SNR={snr:.3f} (threshold={threshold:.3f})"]
-        if bad_param:
-            parts.append(f"high-error param: {bad_param}")
+        parts.extend(problems)
         if fit_problem:
             parts.append(fit_problem)
         return CheckResult(check_name, passed, "; ".join(parts))
 
     def _check_quality_before(self) -> CheckResult:
-        return self._check_fit_quality(self.snr_before, self.fit_result_before, "quality_check_before",
+        return self._check_fit_quality(self.snr_before, self.fit_result_before,
+                                       self.independents_before["frequencies"], "quality_check_before",
                                        self.fit_problem_before)
 
     def _check_quality_after(self) -> CheckResult:
-        return self._check_fit_quality(self.snr_after, self.fit_result_after, "quality_check_after",
+        return self._check_fit_quality(self.snr_after, self.fit_result_after,
+                                       self.independents_after["frequencies"], "quality_check_after",
                                        self.fit_problem_after)
 
     def _check_fit_in_range(self, freqs, fit_result, check_name) -> CheckResult:
