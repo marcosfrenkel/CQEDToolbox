@@ -314,7 +314,14 @@ class ResonatorSpectroscopyVsGain(ProtocolOperation):
 
     def _measure_opx(self) -> Path:
         logger.info("Starting opx resonator spectroscopy vs gain measurement")
-        loc = measure_pulse_resonator_spec_vs_readout_amp()
+        # The OPX sweep writes each gain into the readout amp parameter and leaves it at the sweep end.
+        # Put the original back (also on errors/interrupts); on SUCCESS the success update then writes optimal_gain.
+        original_gain = self.readout_gain()
+        try:
+            loc = measure_pulse_resonator_spec_vs_readout_amp()
+        finally:
+            self.readout_gain(original_gain)
+            logger.info(f"Readout gain restored to {original_gain}")
         logger.info("Measurement complete")
         return loc
 
