@@ -14,7 +14,7 @@ from labcore.measurement import sweep_parameter
 from labcore.measurement.record import recording, dep, indep
 
 from labcore.protocols.base import (ProtocolOperation, OperationStatus, serialize_fit_params,
-                                    CorrectionParameter, CheckResult, Correction, EvaluateResult, PlatformTypes)
+                                    CorrectionParameter, CheckResult, Correction, EvaluateResult)
 from cqedtoolbox.protocols.operations import ResonatorGeometry
 from cqedtoolbox.protocols.parameters import (
     Repetition,
@@ -27,6 +27,7 @@ from cqedtoolbox.protocols.parameters import (
 from cqedtoolbox.protocols.operations.single_qubit.res_spec import (
     ResonatorSpectroscopy,
     SyntheticHangerResonatorData,
+    fit_reliability_problem,
 )
 from cqedtoolbox.measurement_lib.opx.advanced.qubit_tuneup import measure_pulse_resonator_spec_vs_readout_amp
 from cqedtoolbox.measurement_lib.qick.single_transmon_v2 import FreqGainSweepProgram
@@ -256,7 +257,7 @@ class ResonatorSpectroscopyVsGain(ProtocolOperation):
         freqs = np.asarray(freqs, dtype=float)
         return float(np.min(freqs)) <= f0 <= float(np.max(freqs))
 
-    def _trace_invalid_reason(self, freqs, fit_result, snr) -> str | None:
+    def _trace_invalid_reason(self, freqs, fit_result, snr, fit_problem=None) -> str | None:
         if not self._trace_in_range(freqs, fit_result):
             f0 = fit_result.params["f_0"].value
             fmin = float(np.min(freqs))
@@ -265,6 +266,9 @@ class ResonatorSpectroscopyVsGain(ProtocolOperation):
 
         if snr < self.snr_threshold():
             return f"SNR={snr:.3f} < {self.snr_threshold():.3f}"
+
+        if fit_problem:
+            return fit_problem
 
         max_error = self.max_fit_param_error()
         param = fit_result.params["f_0"]
@@ -303,11 +307,13 @@ class ResonatorSpectroscopyVsGain(ProtocolOperation):
         self.dependents["signal"] = data["signal"]["values"]
 
     def _load_data_opx(self):
-        data = load_as_xr(self.data_loc).mean("repetition")
+        data = load_as_xr(self.data_loc).mean("repetition").transpose("ssb_frequency", "amp")
         q = nestedAttributeFromString(self.params, "active.qubit")()
         lo = nestedAttributeFromString(self.params, f"{q}.readout.LO")()
-        self.independents["frequencies"] = data["ssb_frequency"].values + lo
-        self.independents["gains"] = data["amp"].values
+        # Same (n_freq, n_gain) grid layout as the dummy and qick loaders.
+        freqs, gains = np.meshgrid(data["ssb_frequency"].values + lo, data["amp"].values, indexing="ij")
+        self.independents["frequencies"] = freqs
+        self.independents["gains"] = gains
         self.dependents["signal"] = data["signal_Re"].values + 1j * data["signal_Im"].values
 
     def _measure_dummy(self) -> Path:
@@ -413,7 +419,7 @@ class ResonatorSpectroscopyVsGain(ProtocolOperation):
             self.figure_paths.append(image_path)
 
             # Analyze each gain trace individually
-            gains = self.independents["gains"]
+            gains = self.independents["gains"][0]
             res_f_arr = []
             self.fit_results = []
             self.snr_values = []
@@ -423,17 +429,12 @@ class ResonatorSpectroscopyVsGain(ProtocolOperation):
             for i, g in enumerate(gains):
                 folder_name = f"resonator_spec_vs_gain_i={i}_g={g}"
 
-                # FIXME: is this the correct pattern for qick?
-                if self.platform_type == PlatformTypes.OPX:
-                    trace_signal = self.dependents["signal"][i]
-                    freqs = self.independents["frequencies"]
-                else:
-                    trace_signal = self.dependents["signal"].T[i]  # Transpose to achieve gain as axis 0
-                    freqs = self.independents["frequencies"].T[i]
+                trace_signal = self.dependents["signal"].T[i]  # Transpose to achieve gain as axis 0
+                freqs = self.independents["frequencies"].T[i]
 
                 # Use the static method from ResonatorSpectroscopy
                 ret = ResonatorSpectroscopy.add_mag_and_unwind_and_fit(
-                    freqs, trace_signal, self.platform_type, self._fit_cls, f"Gain = {g}"
+                    freqs, trace_signal, self._fit_cls, f"Gain = {g}"
                 )
 
                 _excluded = {"transmission_slope", "phase_slope", "phase_offset"}
@@ -447,13 +448,13 @@ class ResonatorSpectroscopyVsGain(ProtocolOperation):
                         f"{_null_stderr_params} — re-fitting"
                     )
                     ret = ResonatorSpectroscopy.add_mag_and_unwind_and_fit(
-                        freqs, trace_signal, self.platform_type, self._fit_cls, f"Gain = {g}"
+                        freqs, trace_signal, self._fit_cls, f"Gain = {g}"
                     )
 
                 self.fit_results.append(ret.fit_result)
                 self.snr_values.append(ret.snr)
                 res_f_arr.append(ret.fit_result.params["f_0"].value)
-                invalid_reason = self._trace_invalid_reason(freqs, ret.fit_result, ret.snr)
+                invalid_reason = self._trace_invalid_reason(freqs, ret.fit_result, ret.snr, fit_reliability_problem(ret))
                 self.trace_valid.append(invalid_reason is None)
                 self.trace_invalid_reasons.append(invalid_reason)
 
@@ -565,7 +566,7 @@ class ResonatorSpectroscopyVsGain(ProtocolOperation):
         result = super().correct(result)  # check table + success update (writes readout_gain)
 
         if result.status == OperationStatus.SUCCESS:
-            gains = self.independents["gains"]
+            gains = self.independents["gains"][0]
             self.report_output.append("\n### Individual Gain Traces\n")
             for i, (fig_path, g) in enumerate(zip(trace_figures, gains)):
                 validity = "valid" if self.trace_valid[i] else f"invalid ({self.trace_invalid_reasons[i]})"

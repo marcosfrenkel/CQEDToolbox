@@ -1,10 +1,12 @@
 import logging
 from pathlib import Path
 from dataclasses import dataclass, field
+from enum import Enum
 
 import numpy as np
 from numpy.typing import ArrayLike
 import matplotlib.pyplot as plt
+import lmfit
 
 from scipy.signal import savgol_filter
 from scipy.interpolate import CubicSpline
@@ -29,6 +31,19 @@ from cqedtoolbox.fitfuncs.resonators import HangerResponseBruno, ReflectionRespo
 
 logger = logging.getLogger(__name__)
 
+# --- Resonator fit configuration ---
+# Physical bounds for resonator fits, applied to whichever of these parameters the fit model has.
+# f_0 is additionally bounded to the swept range.
+_FIT_BOUNDS = {"Q_i": (1e3, 1e7), "Q_e_mag": (1e2, 1e7), "A": (0.0, np.inf)}
+# Below this residual ratio, S and conj(S) fit about equally well and the orientation choice is a coin flip.
+MIN_ORIENTATION_MARGIN = 1.2
+
+
+class IQOrientation(Enum):
+    """Which orientation of the measured IQ data matched the resonator model."""
+    AS_MEASURED = "as_measured"  # S
+    CONJUGATED = "conjugated"  # conj(S)
+
 
 @dataclass
 class UnwindAndFitRet:
@@ -38,11 +53,13 @@ class UnwindAndFitRet:
     fit_curve: ArrayLike
     fit_result: FitResult
     residuals: ArrayLike
-    residual_std: float
     snr: float
-    unwind_sign: int
     fig: plt.Figure
     ax: plt.Axes
+    residual_std: float = float("nan")
+    orientation: IQOrientation = IQOrientation.AS_MEASURED
+    margin: float = float("inf")  # residual ratio of the rejected orientation to the chosen one
+    at_bound: tuple = ()  # fit parameters that ended at one of their bounds
 
 @dataclass
 class SyntheticHangerResonatorData:
@@ -399,6 +416,49 @@ def unwind_signal(x, y, f=None, sign=1):
     return unwound.real, unwound.imag, f
 
 
+# TODO: physical bounds belong in the fit classes themselves, not attached here by the caller.
+#  See https://github.com/toolsforexperiments/CQEDToolbox/issues/36
+def _bounded_params(fit_cls, frequencies, signal):
+    """Initial guess as lmfit Parameters with bounds attached; guesses outside a bound are clipped into it."""
+    guess = fit_cls.guess(frequencies, signal)
+    bounds = dict(_FIT_BOUNDS, f_0=(float(np.min(frequencies)), float(np.max(frequencies))))
+    bounds = {k: v for k, v in bounds.items() if k in guess}
+    params = {}
+    for name, (lo, hi) in bounds.items():
+        value = guess[name] if np.isfinite(guess[name]) else lo
+        value = min(max(value, lo), hi)
+        if value == 0:
+            value = 1e-30
+        params[name] = lmfit.Parameter(name, value=value, min=lo, max=hi)
+    return params, bounds
+
+
+def fit_reliability_problem(ret: "UnwindAndFitRet") -> str | None:
+    """Reason a fit from add_mag_and_unwind_and_fit should not be trusted, or None if it can be."""
+    if ret.margin < MIN_ORIENTATION_MARGIN:
+        return f"ambiguous IQ orientation (margin={ret.margin:.2f} < {MIN_ORIENTATION_MARGIN})"
+    if ret.at_bound:
+        return f"fit at bound: {', '.join(ret.at_bound)}"
+    return None
+
+
+def _params_at_bound(fit_params, bounds, tol=0.01) -> tuple:
+    """Names of bounded parameters that ended within tol of a bound (relative for Q's, of the span for f_0)."""
+    at_bound = []
+    for name, (lo, hi) in bounds.items():
+        if name == "A":
+            continue
+        value = fit_params[name].value
+        if name == "f_0":
+            span = hi - lo
+            hit = value <= lo + tol * span or value >= hi - tol * span
+        else:
+            hit = value <= lo * (1 + tol) or value >= hi * (1 - tol)
+        if hit:
+            at_bound.append(name)
+    return tuple(at_bound)
+
+
 class ResonatorSpectroscopy(ProtocolOperation):
     _SIM_F0 = 7e9
     _SIM_QI = 20e3
@@ -502,6 +562,7 @@ class ResonatorSpectroscopy(ProtocolOperation):
         self.phase = None
         self.snr = None
         self.fit_result = None
+        self.fit_problem = None
         self.improvements = None
 
     def _measure_qick(self) -> Path:
@@ -564,31 +625,43 @@ class ResonatorSpectroscopy(ProtocolOperation):
         self.dependents["signal"] = data["signal"]["values"]
 
     @staticmethod
-    def add_mag_and_unwind_and_fit(frequencies, signal_raw, platform_type, fit_cls, fig_title="") -> UnwindAndFitRet:
+    def add_mag_and_unwind_and_fit(frequencies, signal_raw, fit_cls, fig_title="") -> UnwindAndFitRet:
+        """Fit a resonator trace without assuming an IQ sign convention.
+
+        The linear phase winding (cable delay) is removed with a polyfit, then both the signal and its
+        complex conjugate are fit with physical bounds, and the orientation with the lower residual is kept.
+        Setups with the opposite IQ convention (e.g. Q demodulated with "sin" instead of "minus_sin" weights)
+        measure the conjugate of the model's convention, which the model could otherwise only follow with
+        negative Q. The margin (rejected / chosen residual) tells how clear the choice was.
+        """
         frequencies = np.asarray(frequencies, dtype=float)
         signal_raw = np.asarray(signal_raw)
 
         magnitude = np.abs(signal_raw)
-        del platform_type
 
-        def fit_candidate(sign: int):
-            unwound_real, unwound_imag, _ = unwind_signal(
-                frequencies, signal_raw, sign=sign
-            )
-            signal_unwind = unwound_real + 1j * unwound_imag
+        def fit_orientation(signal):
+            phase_slope = np.polyfit(frequencies, np.unwrap(np.angle(signal)), 1)[0]
+            signal_unwind = signal * np.exp(-1j * frequencies * phase_slope)
+            params, bounds = _bounded_params(fit_cls, frequencies, signal_unwind)
             fit = fit_cls(frequencies, signal_unwind)
-            fit_result = fit.run(fit)
+            fit_result = fit.run(params=params)
             fit_curve = fit_result.eval()
             residuals = signal_unwind - fit_curve
-            residual_std = float(np.std(residuals))
-            amp = fit_result.params["A"].value
-            snr = np.abs(amp / (4 * residual_std)) if residual_std > 0 else float("inf")
-            return signal_unwind, fit_result, fit_curve, residuals, residual_std, snr
+            rss = float(np.sum(np.abs(residuals) ** 2))
+            return signal_unwind, fit_result, fit_curve, residuals, rss, bounds
 
-        candidates = [fit_candidate(sign) for sign in (1, -1)]
-        best_idx = min(range(len(candidates)), key=lambda i: candidates[i][4])
-        signal_unwind, fit_result, fit_curve, residuals, residual_std, snr = candidates[best_idx]
-        unwind_sign = 1 if best_idx == 0 else -1
+        candidates = {
+            IQOrientation.AS_MEASURED: fit_orientation(signal_raw),
+            IQOrientation.CONJUGATED: fit_orientation(np.conj(signal_raw)),
+        }
+        orientation = min(candidates, key=lambda k: candidates[k][4])
+        rejected = next(k for k in candidates if k is not orientation)
+        signal_unwind, fit_result, fit_curve, residuals, rss, bounds = candidates[orientation]
+        margin = candidates[rejected][4] / rss if rss > 0 else float("inf")
+
+        residual_std = float(np.std(residuals))
+        amp = fit_result.params["A"].value
+        snr = np.abs(amp / (4 * residual_std)) if residual_std > 0 else float("inf")
         phase = np.angle(signal_unwind)
 
         fig, ax = plt.subplots()
@@ -596,7 +669,7 @@ class ResonatorSpectroscopy(ProtocolOperation):
         ax.set_xlabel("Frequency (Hz)")
         ax.set_ylabel("Magnitude Signal (A.U)")
         ax.plot(frequencies, magnitude, label="Data")
-        ax.plot(frequencies, np.abs(fit_curve), label="Fit")
+        ax.plot(frequencies, np.abs(fit_curve), label=f"Fit ({orientation.value}, margin={margin:.2f})")
         ax.legend()
 
         ret = UnwindAndFitRet(
@@ -606,11 +679,13 @@ class ResonatorSpectroscopy(ProtocolOperation):
             fit_curve=fit_curve,
             fit_result=fit_result,
             residuals=residuals,
-            residual_std=residual_std,
             snr=snr,
-            unwind_sign=unwind_sign,
             fig=fig,
             ax=ax,
+            residual_std=residual_std,
+            orientation=orientation,
+            margin=margin,
+            at_bound=_params_at_bound(fit_result.params, bounds),
         )
 
         return ret
@@ -619,7 +694,6 @@ class ResonatorSpectroscopy(ProtocolOperation):
         with DatasetAnalysis(self.data_loc, self.name) as ds:
             ret = self.add_mag_and_unwind_and_fit(self.independents["frequencies"],
                                                   self.dependents["signal"],
-                                                  self.platform_type,
                                                   self._fit_cls,
                                                   "Resonator Spectroscopy")
 
@@ -628,6 +702,7 @@ class ResonatorSpectroscopy(ProtocolOperation):
             self.phase = ret.phase
             self.snr = ret.snr
             self.fit_result = ret.fit_result
+            self.fit_problem = fit_reliability_problem(ret)
 
             ds.add(fit_curve=ret.fit_curve,
                    fit_result=ret.fit_result,
@@ -655,11 +730,13 @@ class ResonatorSpectroscopy(ProtocolOperation):
             bad_param = f"f_0({pct:.0f}%)"
 
         fit_passed = bad_param is None
-        passed = snr_passed and fit_passed
+        passed = snr_passed and fit_passed and self.fit_problem is None
 
         parts = [f"SNR={self.snr:.3f} (threshold={threshold:.3f})"]
         if bad_param:
             parts.append(f"high-error param: {bad_param}")
+        if self.fit_problem:
+            parts.append(self.fit_problem)
 
         return CheckResult("quality_check", passed, "; ".join(parts))
 

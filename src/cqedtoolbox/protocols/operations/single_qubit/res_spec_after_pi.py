@@ -32,6 +32,7 @@ from cqedtoolbox.measurement_lib.qick.single_transmon_v2 import FreqSweepProgram
 from cqedtoolbox.protocols.operations.single_qubit.res_spec import (
     ResonatorSpectroscopy,
     SyntheticHangerResonatorData,
+    fit_reliability_problem,
 )
 
 
@@ -162,6 +163,7 @@ class ResonatorSpectroscopyAfterPi(ProtocolOperation):
         self.magnitude_before = None
         self.fit_result_before = None
         self.snr_before = None
+        self.fit_problem_before = None
         self.f0_before = None
 
         # Data for after measurement
@@ -172,6 +174,7 @@ class ResonatorSpectroscopyAfterPi(ProtocolOperation):
         self.magnitude_after = None
         self.fit_result_after = None
         self.snr_after = None
+        self.fit_problem_after = None
         self.f0_after = None
 
         # Detuning value
@@ -287,7 +290,6 @@ class ResonatorSpectroscopyAfterPi(ProtocolOperation):
             ret_before = ResonatorSpectroscopy.add_mag_and_unwind_and_fit(
                 self.independents_before["frequencies"],
                 self.dependents_before["signal"],
-                self.platform_type,
                 self._fit_cls,
                 "Resonator Spectroscopy Before Pi"
             )
@@ -296,6 +298,7 @@ class ResonatorSpectroscopyAfterPi(ProtocolOperation):
             self.magnitude_before = ret_before.magnitude
             self.fit_result_before = ret_before.fit_result
             self.snr_before = ret_before.snr
+            self.fit_problem_before = fit_reliability_problem(ret_before)
 
             self.f0_before = self.fit_result_before.params["f_0"].value
 
@@ -315,7 +318,6 @@ class ResonatorSpectroscopyAfterPi(ProtocolOperation):
             ret_after = ResonatorSpectroscopy.add_mag_and_unwind_and_fit(
                 self.independents_after["frequencies"],
                 self.dependents_after["signal"],
-                self.platform_type,
                 self._fit_cls,
                 "Resonator Spectroscopy After Pi"
             )
@@ -324,6 +326,7 @@ class ResonatorSpectroscopyAfterPi(ProtocolOperation):
             self.magnitude_after = ret_after.magnitude
             self.fit_result_after = ret_after.fit_result
             self.snr_after = ret_after.snr
+            self.fit_problem_after = fit_reliability_problem(ret_after)
 
             self.f0_after = self.fit_result_after.params["f_0"].value
 
@@ -379,7 +382,7 @@ class ResonatorSpectroscopyAfterPi(ProtocolOperation):
             image_path_combined = ds._new_file_path(ds.savefolders[1], f"{self.name}_combined", suffix="png")
             self.figure_paths.append(image_path_combined)
 
-    def _check_fit_quality(self, snr, fit_result, check_name) -> CheckResult:
+    def _check_fit_quality(self, snr, fit_result, check_name, fit_problem=None) -> CheckResult:
         threshold = self.snr_threshold()
         snr_passed = snr >= threshold
 
@@ -392,17 +395,21 @@ class ResonatorSpectroscopyAfterPi(ProtocolOperation):
             pct = abs(param.stderr / param.value) * 100 if param.value != 0 else float("inf")
             bad_param = f"f_0({pct:.0f}%)"
 
-        passed = snr_passed and bad_param is None
+        passed = snr_passed and bad_param is None and fit_problem is None
         parts = [f"SNR={snr:.3f} (threshold={threshold:.3f})"]
         if bad_param:
             parts.append(f"high-error param: {bad_param}")
+        if fit_problem:
+            parts.append(fit_problem)
         return CheckResult(check_name, passed, "; ".join(parts))
 
     def _check_quality_before(self) -> CheckResult:
-        return self._check_fit_quality(self.snr_before, self.fit_result_before, "quality_check_before")
+        return self._check_fit_quality(self.snr_before, self.fit_result_before, "quality_check_before",
+                                       self.fit_problem_before)
 
     def _check_quality_after(self) -> CheckResult:
-        return self._check_fit_quality(self.snr_after, self.fit_result_after, "quality_check_after")
+        return self._check_fit_quality(self.snr_after, self.fit_result_after, "quality_check_after",
+                                       self.fit_problem_after)
 
     def _check_fit_in_range(self, freqs, fit_result, check_name) -> CheckResult:
         freqs = np.asarray(freqs, dtype=float)
