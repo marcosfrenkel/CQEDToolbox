@@ -31,6 +31,7 @@ from cqedtoolbox.protocols.operations.single_qubit.res_spec import (
     fit_reliability_problem,
 )
 from cqedtoolbox.measurement_lib.opx.advanced.qubit_tuneup import measure_pulse_resonator_spec_vs_readout_amp
+from cqedtoolbox.measurement_lib.opx import single_transmon
 from cqedtoolbox.measurement_lib.qick.single_transmon_v2 import FreqGainSweepProgram
 
 
@@ -316,12 +317,16 @@ class ResonatorSpectroscopyVsGain(ProtocolOperation):
         logger.info("Starting opx resonator spectroscopy vs gain measurement")
         # The OPX sweep writes each gain into the readout amp parameter and leaves it at the sweep end.
         # Put the original back (also on errors/interrupts); on SUCCESS the success update then writes optimal_gain.
+        # It also sets a short shot delay on the global single_transmon options; put back the delay setup chose
+        # (e.g. 10*T1) so the following ops let the qubit relax between shots.
         original_gain = self.readout_gain()
+        original_delay = single_transmon.options.repetition_delay
         try:
             loc = measure_pulse_resonator_spec_vs_readout_amp()
         finally:
             self.readout_gain(original_gain)
-            logger.info(f"Readout gain restored to {original_gain}")
+            single_transmon.options.repetition_delay = original_delay
+            logger.info(f"Readout gain restored to {original_gain}, repetition delay to {original_delay} ns")
         logger.info("Measurement complete")
         return loc
 

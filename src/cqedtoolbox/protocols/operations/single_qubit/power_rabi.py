@@ -15,7 +15,7 @@ from labcore.data.datadict_storage import datadict_from_hdf5, load_as_xr
 
 from labcore.protocols.base import (
     ProtocolOperation, serialize_fit_params,
-    CorrectionParameter, CheckResult, Correction, EvaluateResult,
+    CorrectionParameter, CheckResult, Correction, EvaluateResult, PlatformTypes,
 )
 from cqedtoolbox.protocols.parameters import (
     Repetition,
@@ -383,7 +383,7 @@ class PowerRabi(ProtocolOperation):
 
         self._register_success_update(
             self.qubit_gain,
-            lambda: 1 / (2 * self.fit_result.params["f"].value),
+            self._new_pi_gain,
         )
 
         self.independents = {"gains": []}
@@ -392,6 +392,18 @@ class PowerRabi(ProtocolOperation):
         self.fit_result = None
         self.residuals = None
         self.snr = None
+
+    def _new_pi_gain(self) -> float:
+        """Pi gain from the fitted Rabi frequency: the swept gain at half a period, 1/(2f)."""
+        pi_point = 1 / (2 * self.fit_result.params["f"].value)
+        if self.platform_type == PlatformTypes.OPX:
+            # WARNING: on the OPX the swept "amplitude" is a multiplier on the current pi pulse
+            # (play(pi_pulse * amp(a))), not an absolute amplitude, so pi_point is a scale factor.
+            # This assumes the setup's QM config builds the pi waveform from {qubit}.pulses.pi.amp
+            # (the parameter QubitGain reads/writes). If the config takes the amplitude from
+            # anywhere else, this update is wrong.
+            return self.qubit_gain() * pi_point
+        return pi_point
 
     def _measure_qick(self) -> Path:
         logger.info("Starting qick power rabi measurement")

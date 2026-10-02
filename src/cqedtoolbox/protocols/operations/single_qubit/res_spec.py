@@ -24,6 +24,7 @@ from cqedtoolbox.protocols.parameters import (Repetition,
                                               ResonatorSpecSteps, ReadoutGain, ReadoutLength, StartReadoutFrequency,
                                               EndReadoutFrequency, ReadoutFrequency, nestedAttributeFromString)
 from cqedtoolbox.measurement_lib.opx.advanced.qubit_tuneup import measure_pulse_resonator_spec
+from cqedtoolbox.measurement_lib.opx import single_transmon
 from cqedtoolbox.measurement_lib.qick.single_transmon_v2 import FreqSweepProgram
 
 from cqedtoolbox.fitfuncs.resonators import HangerResponseBruno, ReflectionResponse, TransmissionResponse
@@ -627,7 +628,13 @@ class ResonatorSpectroscopy(ProtocolOperation):
 
     def _measure_opx(self) -> Path:
         logger.info("Starting opx resonator spectroscopy measurement")
-        loc = measure_pulse_resonator_spec()
+        # measure_pulse_resonator_spec sets a short shot delay on the global single_transmon options and leaves it.
+        # Put back the delay setup chose (e.g. 10*T1) so the following ops let the qubit relax between shots.
+        original_delay = single_transmon.options.repetition_delay
+        try:
+            loc = measure_pulse_resonator_spec()
+        finally:
+            single_transmon.options.repetition_delay = original_delay
         logger.info("Measurement complete")
         return loc
     
