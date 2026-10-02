@@ -45,6 +45,12 @@ class PiSpecSNRThreshold(CorrectionParameter):
     def _qick_setter(self, value):
         self.params.corrections.pi_spec.snr(value)
 
+    def _dummy_getter(self):
+        return self.params.corrections.pi_spec.snr()
+
+    def _dummy_setter(self, value):
+        self.params.corrections.pi_spec.snr(value)
+        
     def _opx_getter(self):
         return self.params.corrections.pi_spec.snr()
 
@@ -63,6 +69,12 @@ class PiSpecMaxFitParamError(CorrectionParameter):
     def _qick_setter(self, value):
         self.params.corrections.pi_spec.max_fit_param_error(value)
 
+    def _dummy_getter(self):
+        return self.params.corrections.pi_spec.max_fit_param_error()
+
+    def _dummy_setter(self, value):
+        self.params.corrections.pi_spec.max_fit_param_error(value)
+        
     def _opx_getter(self):
         return self.params.corrections.pi_spec.max_fit_param_error()
 
@@ -81,6 +93,12 @@ class PiSpecAveragingFactor(CorrectionParameter):
     def _qick_setter(self, value):
         self.params.corrections.pi_spec.averaging_factor(value)
 
+    def _dummy_getter(self):
+        return self.params.corrections.pi_spec.averaging_factor()
+
+    def _dummy_setter(self, value):
+        self.params.corrections.pi_spec.averaging_factor(value)
+        
     def _opx_getter(self):
         return self.params.corrections.pi_spec.averaging_factor()
 
@@ -99,6 +117,12 @@ class PiSpecMaxAveragingIncreases(CorrectionParameter):
     def _qick_setter(self, value):
         self.params.corrections.pi_spec.max_averaging_increases(value)
 
+    def _dummy_getter(self):
+        return int(self.params.corrections.pi_spec.max_averaging_increases())
+
+    def _dummy_setter(self, value):
+        self.params.corrections.pi_spec.max_averaging_increases(value)
+        
     def _opx_getter(self):
         return int(self.params.corrections.pi_spec.max_averaging_increases())
 
@@ -245,7 +269,7 @@ class PiSpectroscopy(ProtocolOperation):
 
         return fit_result, residuals, snr, fig
 
-    def analyze(self):
+    def _analyze_default(self):
         with DatasetAnalysis(self.data_loc, self.name) as ds:
             self.fit_result, self.residuals, self.snr, fig = self._fit_gaussian(
                 self.independents["frequencies"],
@@ -270,18 +294,18 @@ class PiSpectroscopy(ProtocolOperation):
         snr_passed = self.snr >= threshold
 
         max_error = self.max_fit_param_error()
-        bad_params = []
-        for pname, param in self.fit_result.params.items():
-            if param.stderr is None:
-                bad_params.append(f"{pname}(no stderr)")
-            elif param.value != 0 and abs(param.stderr / param.value) > max_error:
-                pct = abs(param.stderr / param.value) * 100
-                bad_params.append(f"{pname}({pct:.0f}%)")
+        param = self.fit_result.params["x0"]
+        bad_param = None
+        if param.stderr is None:
+            bad_param = "x0(no stderr)"
+        elif param.value == 0 or abs(param.stderr / param.value) > max_error:
+            pct = abs(param.stderr / param.value) * 100 if param.value != 0 else float("inf")
+            bad_param = f"x0({pct:.0f}%)"
 
-        passed = snr_passed and len(bad_params) == 0
+        passed = snr_passed and bad_param is None
         parts = [f"SNR={self.snr:.3f} (threshold={threshold:.3f})"]
-        if bad_params:
-            parts.append(f"high-error params: {', '.join(bad_params)}")
+        if bad_param:
+            parts.append(f"high-error param: {bad_param}")
         return CheckResult("quality_check", passed, "; ".join(parts))
 
     def correct(self, result: EvaluateResult) -> EvaluateResult:

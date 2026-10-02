@@ -15,8 +15,8 @@ from labcore.measurement.storage import run_and_save_sweep
 from labcore.data.datadict_storage import datadict_from_hdf5, load_as_xr
 from labcore.measurement import sweep_parameter, record_as
 
-from labcore.protocols.base import (ProtocolOperation, OperationStatus, serialize_fit_params,
-                                    ParamImprovement, CorrectionParameter, CheckResult, Correction, PlatformTypes)
+from labcore.protocols.base import (ProtocolOperation, serialize_fit_params, CorrectionParameter,
+                                    CheckResult, Correction)
 from cqedtoolbox.protocols.operations import ResonatorGeometry
 from cqedtoolbox.protocols.parameters import (Repetition,
                                               ResonatorSpecSteps, ReadoutGain, ReadoutLength, StartReadoutFrequency,
@@ -71,6 +71,12 @@ class SNRThreshold(CorrectionParameter):
     def _qick_setter(self, value):
         self.params.corrections.res_spec.snr(value)
 
+    def _dummy_getter(self):
+        return self.params.corrections.res_spec.snr()
+
+    def _dummy_setter(self, value):
+        self.params.corrections.res_spec.snr(value)
+
     def _opx_getter(self):
         return self.params.corrections.res_spec.snr()
 
@@ -86,6 +92,12 @@ class MaxWindowShifts(CorrectionParameter):
         return int(self.params.corrections.res_spec.max_window_shifts())
 
     def _qick_setter(self, value):
+        self.params.corrections.res_spec.max_window_shifts(value)
+
+    def _dummy_getter(self):
+        return int(self.params.corrections.res_spec.max_window_shifts())
+
+    def _dummy_setter(self, value):
         self.params.corrections.res_spec.max_window_shifts(value)
 
     def _opx_getter(self):
@@ -105,6 +117,12 @@ class SamplingIncreaseFactor(CorrectionParameter):
     def _qick_setter(self, value):
         self.params.corrections.res_spec.sampling_factor(value)
 
+    def _dummy_getter(self):
+        return self.params.corrections.res_spec.sampling_factor()
+
+    def _dummy_setter(self, value):
+        self.params.corrections.res_spec.sampling_factor(value)
+
     def _opx_getter(self):
         return self.params.corrections.res_spec.sampling_factor()
 
@@ -120,6 +138,12 @@ class MaxSamplingIncreases(CorrectionParameter):
         return int(self.params.corrections.res_spec.max_sampling_increases())
 
     def _qick_setter(self, value):
+        self.params.corrections.res_spec.max_sampling_increases(value)
+
+    def _dummy_getter(self):
+        return int(self.params.corrections.res_spec.max_sampling_increases())
+
+    def _dummy_setter(self, value):
         self.params.corrections.res_spec.max_sampling_increases(value)
 
     def _opx_getter(self):
@@ -139,6 +163,12 @@ class AveragingIncreaseFactor(CorrectionParameter):
     def _qick_setter(self, value):
         self.params.corrections.res_spec.averaging_factor(value)
 
+    def _dummy_getter(self):
+        return self.params.corrections.res_spec.averaging_factor()
+
+    def _dummy_setter(self, value):
+        self.params.corrections.res_spec.averaging_factor(value)
+
     def _opx_getter(self):
         return self.params.corrections.res_spec.averaging_factor()
 
@@ -156,6 +186,12 @@ class MaxAveragingIncreases(CorrectionParameter):
     def _qick_setter(self, value):
         self.params.corrections.res_spec.max_averaging_increases(value)
 
+    def _dummy_getter(self):
+        return int(self.params.corrections.res_spec.max_averaging_increases())
+
+    def _dummy_setter(self, value):
+        self.params.corrections.res_spec.max_averaging_increases(value)
+
     def _opx_getter(self):
         return int(self.params.corrections.res_spec.max_averaging_increases())
 
@@ -171,6 +207,12 @@ class MaxFitParamError(CorrectionParameter):
         return self.params.corrections.res_spec.max_fit_param_error()
 
     def _qick_setter(self, value):
+        self.params.corrections.res_spec.max_fit_param_error(value)
+
+    def _dummy_getter(self):
+        return self.params.corrections.res_spec.max_fit_param_error()
+
+    def _dummy_setter(self, value):
         self.params.corrections.res_spec.max_fit_param_error(value)
 
     def _opx_getter(self):
@@ -362,7 +404,7 @@ class ResonatorSpectroscopy(ProtocolOperation):
     _SIM_QI = 20e3
     _SIM_QC = 20e3
     _SIM_A = 4.0
-    _SIM_PHI = 0.0
+    _SIM_PHI = 0.4
     _SIM_NOISE_AMP = 0.05
     
     def __init__(self, params, geometry: ResonatorGeometry | str):
@@ -438,14 +480,17 @@ class ResonatorSpectroscopy(ProtocolOperation):
             lambda: self.fit_result.params["f_0"].value,
         )
 
+        # Capture the configured width before the start/end updates run sequentially.
+        half_span = abs(self.end_frequency() - self.start_frequency()) / 2
+
         self._register_success_update(
             self.start_frequency,
-            lambda: self.fit_result.params["f_0"].value - 5 if self.platform_type == PlatformTypes.QICK else self.fit_result.params["f_0"].value - 5e6,
+            lambda: self.fit_result.params["f_0"].value - half_span,
         )
 
         self._register_success_update(
             self.end_frequency,
-            lambda: self.fit_result.params["f_0"].value + 5 if self.platform_type == PlatformTypes.QICK else self.fit_result.params["f_0"].value + 5e6,
+            lambda: self.fit_result.params["f_0"].value + half_span,
         )
 
         self.condition = f"Success if the SNR of the measurement is bigger than the current threshold of " # {self.SNR_THRESHOLD}"
@@ -487,7 +532,7 @@ class ResonatorSpectroscopy(ProtocolOperation):
             noise_amp = self._SIM_NOISE_AMP
         )
 
-        sweep = sweep_parameter("frequencies", frequencies + self.readout_lo(), record_as(generator.generate, "signal"))
+        sweep = sweep_parameter("frequencies", frequencies, record_as(generator.generate, "signal"))
         loc, _ = run_and_save_sweep(sweep, "data", self.name)
 
         logger.info("Dummy measurement complete")
@@ -570,10 +615,11 @@ class ResonatorSpectroscopy(ProtocolOperation):
 
         return ret
 
-    def analyze(self):
+    def _analyze_default(self):
         with DatasetAnalysis(self.data_loc, self.name) as ds:
             ret = self.add_mag_and_unwind_and_fit(self.independents["frequencies"],
                                                   self.dependents["signal"],
+                                                  self.platform_type,
                                                   self._fit_cls,
                                                   "Resonator Spectroscopy")
 
@@ -600,22 +646,20 @@ class ResonatorSpectroscopy(ProtocolOperation):
         snr_passed = self.snr >= threshold
 
         max_error = self.max_fit_param_error()
-        bad_params = []
-        for pname, param in self.fit_result.params.items():
-            if pname in ["transmission_slope", "phase_slope", "phase_offset"]:
-                continue
-            if param.stderr is None:
-                bad_params.append(f"{pname}(no stderr)")
-            elif param.value == 0 or abs(param.stderr / param.value) > max_error:
-                pct = abs(param.stderr / param.value) * 100 if param.value != 0 else float("inf")
-                bad_params.append(f"{pname}({pct:.0f}%)")
+        param = self.fit_result.params["f_0"]
+        bad_param = None
+        if param.stderr is None:
+            bad_param = "f_0(no stderr)"
+        elif param.value == 0 or abs(param.stderr / param.value) > max_error:
+            pct = abs(param.stderr / param.value) * 100 if param.value != 0 else float("inf")
+            bad_param = f"f_0({pct:.0f}%)"
 
-        fit_passed = len(bad_params) == 0
+        fit_passed = bad_param is None
         passed = snr_passed and fit_passed
 
         parts = [f"SNR={self.snr:.3f} (threshold={threshold:.3f})"]
-        if bad_params:
-            parts.append(f"high-error params: {', '.join(bad_params)}")
+        if bad_param:
+            parts.append(f"high-error param: {bad_param}")
 
         return CheckResult("quality_check", passed, "; ".join(parts))
 

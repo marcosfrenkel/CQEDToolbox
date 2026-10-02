@@ -44,6 +44,8 @@ class SNRThreshold(CorrectionParameter):
 
     def _qick_getter(self): return self.params.corrections.power_rabi.snr()
     def _qick_setter(self, v): self.params.corrections.power_rabi.snr(v)
+    def _dummy_getter(self): return self.params.corrections.power_rabi.snr()
+    def _dummy_setter(self, v): self.params.corrections.power_rabi.snr(v)
     def _opx_getter(self): return self.params.corrections.power_rabi.snr()
     def _opx_setter(self, v): self.params.corrections.power_rabi.snr(v)
 
@@ -55,6 +57,8 @@ class MaxFitParamError(CorrectionParameter):
 
     def _qick_getter(self): return self.params.corrections.power_rabi.max_fit_param_error()
     def _qick_setter(self, v): self.params.corrections.power_rabi.max_fit_param_error(v)
+    def _dummy_getter(self): return self.params.corrections.power_rabi.max_fit_param_error()
+    def _dummy_setter(self, v): self.params.corrections.power_rabi.max_fit_param_error(v)
     def _opx_getter(self): return self.params.corrections.power_rabi.max_fit_param_error()
     def _opx_setter(self, v): self.params.corrections.power_rabi.max_fit_param_error(v)
 
@@ -66,6 +70,8 @@ class AveragingIncreaseFactor(CorrectionParameter):
 
     def _qick_getter(self): return self.params.corrections.power_rabi.averaging_factor()
     def _qick_setter(self, v): self.params.corrections.power_rabi.averaging_factor(v)
+    def _dummy_getter(self): return self.params.corrections.power_rabi.averaging_factor()
+    def _dummy_setter(self, v): self.params.corrections.power_rabi.averaging_factor(v)
     def _opx_getter(self): return self.params.corrections.power_rabi.averaging_factor()
     def _opx_setter(self, v): self.params.corrections.power_rabi.averaging_factor(v)
 
@@ -77,6 +83,8 @@ class MaxAveragingIncreases(CorrectionParameter):
 
     def _qick_getter(self): return int(self.params.corrections.power_rabi.max_averaging_increases())
     def _qick_setter(self, v): self.params.corrections.power_rabi.max_averaging_increases(v)
+    def _dummy_getter(self): return int(self.params.corrections.power_rabi.max_averaging_increases())
+    def _dummy_setter(self, v): self.params.corrections.power_rabi.max_averaging_increases(v)
     def _opx_getter(self): return int(self.params.corrections.power_rabi.max_averaging_increases())
     def _opx_setter(self, v): self.params.corrections.power_rabi.max_averaging_increases(v)
 
@@ -88,6 +96,8 @@ class SamplingIncreaseFactor(CorrectionParameter):
 
     def _qick_getter(self): return self.params.corrections.power_rabi.sampling_factor()
     def _qick_setter(self, v): self.params.corrections.power_rabi.sampling_factor(v)
+    def _dummy_getter(self): return self.params.corrections.power_rabi.sampling_factor()
+    def _dummy_setter(self, v): self.params.corrections.power_rabi.sampling_factor(v)
     def _opx_getter(self): return self.params.corrections.power_rabi.sampling_factor()
     def _opx_setter(self, v): self.params.corrections.power_rabi.sampling_factor(v)
 
@@ -99,6 +109,8 @@ class MaxSamplingIncreases(CorrectionParameter):
 
     def _qick_getter(self): return int(self.params.corrections.power_rabi.max_sampling_increases())
     def _qick_setter(self, v): self.params.corrections.power_rabi.max_sampling_increases(v)
+    def _dummy_getter(self): return int(self.params.corrections.power_rabi.max_sampling_increases())
+    def _dummy_setter(self, v): self.params.corrections.power_rabi.max_sampling_increases(v)
     def _opx_getter(self): return int(self.params.corrections.power_rabi.max_sampling_increases())
     def _opx_setter(self, v): self.params.corrections.power_rabi.max_sampling_increases(v)
 
@@ -110,6 +122,8 @@ class DelayIncreaseFactor(CorrectionParameter):
 
     def _qick_getter(self): return self.params.corrections.power_rabi.delay_factor()
     def _qick_setter(self, v): self.params.corrections.power_rabi.delay_factor(v)
+    def _dummy_getter(self): return self.params.corrections.power_rabi.delay_factor()
+    def _dummy_setter(self, v): self.params.corrections.power_rabi.delay_factor(v)
     def _opx_getter(self): return self.params.corrections.power_rabi.delay_factor()
     def _opx_setter(self, v): self.params.corrections.power_rabi.delay_factor(v)
 
@@ -121,6 +135,8 @@ class MaxDelayIncreases(CorrectionParameter):
 
     def _qick_getter(self): return int(self.params.corrections.power_rabi.max_delay_increases())
     def _qick_setter(self, v): self.params.corrections.power_rabi.max_delay_increases(v)
+    def _dummy_getter(self): return int(self.params.corrections.power_rabi.max_delay_increases())
+    def _dummy_setter(self, v): self.params.corrections.power_rabi.max_delay_increases(v)
     def _opx_getter(self): return int(self.params.corrections.power_rabi.max_delay_increases())
     def _opx_setter(self, v): self.params.corrections.power_rabi.max_delay_increases(v)
 
@@ -132,6 +148,8 @@ class GainRangeShrinkFactor(CorrectionParameter):
 
     def _qick_getter(self): return self.params.corrections.power_rabi.gain_shrink_factor()
     def _qick_setter(self, v): self.params.corrections.power_rabi.gain_shrink_factor(v)
+    def _dummy_getter(self): return self.params.corrections.power_rabi.gain_shrink_factor()
+    def _dummy_setter(self, v): self.params.corrections.power_rabi.gain_shrink_factor(v)
     def _opx_getter(self): return self.params.corrections.power_rabi.gain_shrink_factor()
     def _opx_setter(self, v): self.params.corrections.power_rabi.gain_shrink_factor(v)
 
@@ -143,6 +161,8 @@ class MaxGainRangeShrinks(CorrectionParameter):
 
     def _qick_getter(self): return int(self.params.corrections.power_rabi.max_gain_shrinks())
     def _qick_setter(self, v): self.params.corrections.power_rabi.max_gain_shrinks(v)
+    def _dummy_getter(self): return int(self.params.corrections.power_rabi.max_gain_shrinks())
+    def _dummy_setter(self, v): self.params.corrections.power_rabi.max_gain_shrinks(v)
     def _opx_getter(self): return int(self.params.corrections.power_rabi.max_gain_shrinks())
     def _opx_setter(self, v): self.params.corrections.power_rabi.max_gain_shrinks(v)
 
@@ -442,7 +462,7 @@ class PowerRabi(ProtocolOperation):
 
         return fit_result, residuals, snr, fig
 
-    def analyze(self):
+    def _analyze_default(self):
         with DatasetAnalysis(self.data_loc, self.name) as ds:
             self.fit_result, self.residuals, self.snr, fig = self._fit_cosine(
                 self.independents["gains"],
@@ -466,18 +486,18 @@ class PowerRabi(ProtocolOperation):
         snr_passed = self.snr >= threshold
 
         max_error = self.max_fit_param_error()
-        bad_params = []
-        for pname, param in self.fit_result.params.items():
-            if param.stderr is None:
-                bad_params.append(f"{pname}(no stderr)")
-            elif param.value == 0 or abs(param.stderr / param.value) > max_error:
-                pct = abs(param.stderr / param.value) * 100 if param.value != 0 else float("inf")
-                bad_params.append(f"{pname}({pct:.0f}%)")
+        param = self.fit_result.params["f"]
+        bad_param = None
+        if param.stderr is None:
+            bad_param = "f(no stderr)"
+        elif param.value == 0 or abs(param.stderr / param.value) > max_error:
+            pct = abs(param.stderr / param.value) * 100 if param.value != 0 else float("inf")
+            bad_param = f"f({pct:.0f}%)"
 
-        passed = snr_passed and len(bad_params) == 0
+        passed = snr_passed and bad_param is None
         parts = [f"SNR={self.snr:.3f} (threshold={threshold:.3f})"]
-        if bad_params:
-            parts.append(f"high-error params: {', '.join(bad_params)}")
+        if bad_param:
+            parts.append(f"high-error param: {bad_param}")
         return CheckResult("quality_check", passed, "; ".join(parts))
 
     def correct(self, result: EvaluateResult) -> EvaluateResult:

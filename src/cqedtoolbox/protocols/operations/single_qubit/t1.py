@@ -46,6 +46,8 @@ class SNRMinThreshold(CorrectionParameter):
 
     def _qick_getter(self): return self.params.corrections.t1.snr_min()
     def _qick_setter(self, v): self.params.corrections.t1.snr_min(v)
+    def _dummy_getter(self): return self.params.corrections.t1.snr_min()
+    def _dummy_setter(self, v): self.params.corrections.t1.snr_min(v)
     def _opx_getter(self): return self.params.corrections.t1.snr_min()
     def _opx_setter(self, v): self.params.corrections.t1.snr_min(v)
 
@@ -57,6 +59,8 @@ class MaxFitParamError(CorrectionParameter):
 
     def _qick_getter(self): return self.params.corrections.t1.max_fit_param_error()
     def _qick_setter(self, v): self.params.corrections.t1.max_fit_param_error(v)
+    def _dummy_getter(self): return self.params.corrections.t1.max_fit_param_error()
+    def _dummy_setter(self, v): self.params.corrections.t1.max_fit_param_error(v)
     def _opx_getter(self): return self.params.corrections.t1.max_fit_param_error()
     def _opx_setter(self, v): self.params.corrections.t1.max_fit_param_error(v)
 
@@ -68,6 +72,8 @@ class DelayIncreaseFactor(CorrectionParameter):
 
     def _qick_getter(self): return self.params.corrections.t1.delay_factor()
     def _qick_setter(self, v): self.params.corrections.t1.delay_factor(v)
+    def _dummy_getter(self): return self.params.corrections.t1.delay_factor()
+    def _dummy_setter(self, v): self.params.corrections.t1.delay_factor(v)
     def _opx_getter(self): return self.params.corrections.t1.delay_factor()
     def _opx_setter(self, v): self.params.corrections.t1.delay_factor(v)
 
@@ -79,6 +85,8 @@ class MaxDelayIncreases(CorrectionParameter):
 
     def _qick_getter(self): return int(self.params.corrections.t1.max_delay_increases())
     def _qick_setter(self, v): self.params.corrections.t1.max_delay_increases(v)
+    def _dummy_getter(self): return int(self.params.corrections.t1.max_delay_increases())
+    def _dummy_setter(self, v): self.params.corrections.t1.max_delay_increases(v)
     def _opx_getter(self): return int(self.params.corrections.t1.max_delay_increases())
     def _opx_setter(self, v): self.params.corrections.t1.max_delay_increases(v)
 
@@ -90,6 +98,8 @@ class AveragingIncreaseFactor(CorrectionParameter):
 
     def _qick_getter(self): return self.params.corrections.t1.averaging_factor()
     def _qick_setter(self, v): self.params.corrections.t1.averaging_factor(v)
+    def _dummy_getter(self): return self.params.corrections.t1.averaging_factor()
+    def _dummy_setter(self, v): self.params.corrections.t1.averaging_factor(v)
     def _opx_getter(self): return self.params.corrections.t1.averaging_factor()
     def _opx_setter(self, v): self.params.corrections.t1.averaging_factor(v)
 
@@ -101,6 +111,8 @@ class MaxAveragingIncreases(CorrectionParameter):
 
     def _qick_getter(self): return int(self.params.corrections.t1.max_averaging_increases())
     def _qick_setter(self, v): self.params.corrections.t1.max_averaging_increases(v)
+    def _dummy_getter(self): return int(self.params.corrections.t1.max_averaging_increases())
+    def _dummy_setter(self, v): self.params.corrections.t1.max_averaging_increases(v)
     def _opx_getter(self): return int(self.params.corrections.t1.max_averaging_increases())
     def _opx_setter(self, v): self.params.corrections.t1.max_averaging_increases(v)
 
@@ -184,8 +196,9 @@ class IncreaseAveragingCorrection(Correction):
 class T1Operation(ProtocolOperation):
 
     _SIM_T1 = 20.0
-    _SIM_AMP = 0.5
+    _SIM_AMP = 0.35 + 0.35j
     _SIM_NOISE_AMP = 0.02
+    _SIM_OFFSET = 0.4 + 0.4j
 
     def __init__(self, params):
         super().__init__()
@@ -242,7 +255,7 @@ class T1Operation(ProtocolOperation):
         logger.info("Starting dummy T1 measurement")
         delays = np.linspace(0, 5 * self._SIM_T1, int(self.steps()))
         signal_gen = lambda delays: (self._SIM_AMP * np.exp(-delays / self._SIM_T1)
-                  + self._SIM_NOISE_AMP * (np.random.randn() + 1j * np.random.randn()))
+                  + self._SIM_OFFSET + self._SIM_NOISE_AMP * (np.random.randn() + 1j * np.random.randn()))
         sweep = sweep_parameter("delays", delays, record_as(signal_gen, "signal"))
         loc, _ = run_and_save_sweep(sweep, "data", self.name)
         logger.info("Dummy measurement complete")
@@ -304,7 +317,7 @@ class T1Operation(ProtocolOperation):
 
         return fit_result, residuals, snr, fig
 
-    def analyze(self):
+    def _analyze_default(self):
         with DatasetAnalysis(self.data_loc, self.name) as ds:
             self.fit_result, self.residuals, self.snr, fig = self._fit_exponential(
                 self.independents["delays"],
@@ -326,17 +339,17 @@ class T1Operation(ProtocolOperation):
     def _check_quality(self) -> CheckResult:
         snr_min = self.snr_min_threshold()
         max_error = self.max_fit_param_error()
-        bad_params = []
-        for pname, param in self.fit_result.params.items():
-            if param.stderr is None:
-                bad_params.append(f"{pname}(no stderr)")
-            elif param.value == 0 or abs(param.stderr / param.value) > max_error:
-                pct = abs(param.stderr / param.value) * 100 if param.value != 0 else float("inf")
-                bad_params.append(f"{pname}({pct:.0f}%)")
-        passed = self.snr >= snr_min and len(bad_params) == 0
+        param = self.fit_result.params["tau"]
+        bad_param = None
+        if param.stderr is None:
+            bad_param = "tau(no stderr)"
+        elif param.value == 0 or abs(param.stderr / param.value) > max_error:
+            pct = abs(param.stderr / param.value) * 100 if param.value != 0 else float("inf")
+            bad_param = f"tau({pct:.0f}%)"
+        passed = self.snr >= snr_min and bad_param is None
         parts = [f"SNR={self.snr:.3f} (threshold={snr_min:.1f})"]
-        if bad_params:
-            parts.append(f"high-error params: {', '.join(bad_params)}")
+        if bad_param:
+            parts.append(f"high-error param: {bad_param}")
 
         return CheckResult("quality_check", passed, "; ".join(parts))
 

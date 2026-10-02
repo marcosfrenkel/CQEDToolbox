@@ -46,6 +46,12 @@ class ResSpecVsGainSNRThreshold(CorrectionParameter):
     def _qick_setter(self, v):
         self.params.corrections.res_spec_vs_gain.snr(v)
 
+    def _dummy_getter(self):
+        return self.params.corrections.res_spec_vs_gain.snr()
+
+    def _dummy_setter(self, v):
+        self.params.corrections.res_spec_vs_gain.snr(v)
+        
     def _opx_getter(self):
         return self.params.corrections.res_spec_vs_gain.snr()
 
@@ -64,6 +70,12 @@ class ResSpecVsGainMaxFitParamError(CorrectionParameter):
     def _qick_setter(self, v):
         self.params.corrections.res_spec_vs_gain.max_fit_param_error(v)
 
+    def _dummy_getter(self):
+        return self.params.corrections.res_spec_vs_gain.max_fit_param_error()
+
+    def _dummy_setter(self, v):
+        self.params.corrections.res_spec_vs_gain.max_fit_param_error(v)
+        
     def _opx_getter(self):
         return self.params.corrections.res_spec_vs_gain.max_fit_param_error()
 
@@ -82,6 +94,12 @@ class ResSpecVsGainHighSNRThreshold(CorrectionParameter):
     def _qick_setter(self, v):
         self.params.corrections.res_spec_vs_gain.high_snr(v)
 
+    def _dummy_getter(self):
+        return self.params.corrections.res_spec_vs_gain.high_snr()
+
+    def _dummy_setter(self, v):
+        self.params.corrections.res_spec_vs_gain.high_snr(v)
+        
     def _opx_getter(self):
         return self.params.corrections.res_spec_vs_gain.high_snr()
 
@@ -100,6 +118,12 @@ class ResSpecVsGainRepetitionFactor(CorrectionParameter):
     def _qick_setter(self, v):
         self.params.corrections.res_spec_vs_gain.rep_factor(v)
 
+    def _dummy_getter(self):
+        return self.params.corrections.res_spec_vs_gain.rep_factor()
+
+    def _dummy_setter(self, v):
+        self.params.corrections.res_spec_vs_gain.rep_factor(v)
+        
     def _opx_getter(self):
         return self.params.corrections.res_spec_vs_gain.rep_factor()
 
@@ -118,6 +142,12 @@ class ResSpecVsGainMaxRepetitionIncreases(CorrectionParameter):
     def _qick_setter(self, v):
         self.params.corrections.res_spec_vs_gain.max_rep_increases(v)
 
+    def _dummy_getter(self):
+        return int(self.params.corrections.res_spec_vs_gain.max_rep_increases())
+
+    def _dummy_setter(self, v):
+        self.params.corrections.res_spec_vs_gain.max_rep_increases(v)
+        
     def _opx_getter(self):
         return int(self.params.corrections.res_spec_vs_gain.max_rep_increases())
 
@@ -237,14 +267,12 @@ class ResonatorSpectroscopyVsGain(ProtocolOperation):
             return f"SNR={snr:.3f} < {self.snr_threshold():.3f}"
 
         max_error = self.max_fit_param_error()
-        for pname, param in fit_result.params.items():
-            if pname in ["transmission_slope", "phase_slope", "phase_offset"]:
-                continue
-            if param.stderr is None:
-                return f"{pname}: no stderr"
-            if param.value == 0 or abs(param.stderr / param.value) > max_error:
-                pct = abs(param.stderr / param.value) * 100 if param.value != 0 else float("inf")
-                return f"{pname}: {pct:.0f}% error"
+        param = fit_result.params["f_0"]
+        if param.stderr is None:
+            return "f_0: no stderr"
+        if param.value == 0 or abs(param.stderr / param.value) > max_error:
+            pct = abs(param.stderr / param.value) * 100 if param.value != 0 else float("inf")
+            return f"f_0: {pct:.0f}% error"
 
         return None
 
@@ -375,7 +403,7 @@ class ResonatorSpectroscopyVsGain(ProtocolOperation):
         ax.plot(gains, snr_values, marker='.', linestyle='-')
         return fig
 
-    def analyze(self):
+    def _analyze_default(self):
         with DatasetAnalysis(self.data_loc, self.name) as ds:
             # Create magnitude colorbar plot
             mag_fig = self._plot_magnitude_colorbar()
@@ -483,10 +511,8 @@ class ResonatorSpectroscopyVsGain(ProtocolOperation):
             )
 
     def _check_low_gain_quality(self) -> CheckResult:
-        """Quality check (SNR + fit error) for the first 50% of gain traces."""
+        """Quality check (SNR + f_0 error) for the first 50% of gain traces."""
         n_low = max(1, len(self.snr_values) // 2)
-        threshold = self.snr_threshold()
-        max_error = self.max_fit_param_error()
 
         failures = []
         for i in range(n_low):

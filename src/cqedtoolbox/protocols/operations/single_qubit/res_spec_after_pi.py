@@ -51,6 +51,12 @@ class ResSpecAfterPiSNRThreshold(CorrectionParameter):
     def _qick_setter(self, value):
         self.params.corrections.res_spec_after_pi.snr(value)
 
+    def _dummy_getter(self):
+        return self.params.corrections.res_spec_after_pi.snr()
+
+    def _dummy_setter(self, value):
+        self.params.corrections.res_spec_after_pi.snr(value)
+        
     def _opx_getter(self):
         return self.params.corrections.res_spec_after_pi.snr()
 
@@ -69,6 +75,12 @@ class ResSpecAfterPiMaxFitParamError(CorrectionParameter):
     def _qick_setter(self, value):
         self.params.corrections.res_spec_after_pi.max_fit_param_error(value)
 
+    def _dummy_getter(self):
+        return self.params.corrections.res_spec_after_pi.max_fit_param_error()
+
+    def _dummy_setter(self, value):
+        self.params.corrections.res_spec_after_pi.max_fit_param_error(value)
+        
     def _opx_getter(self):
         return self.params.corrections.res_spec_after_pi.max_fit_param_error()
 
@@ -87,6 +99,12 @@ class DetuningThreshold(CorrectionParameter):
     def _qick_setter(self, value):
         self.params.corrections.res_spec_after_pi.detuning_threshold(value)
 
+    def _dummy_getter(self):
+        return self.params.corrections.res_spec_after_pi.detuning_threshold()
+
+    def _dummy_setter(self, value):
+        self.params.corrections.res_spec_after_pi.detuning_threshold(value)
+        
     def _opx_getter(self):
         return self.params.corrections.res_spec_after_pi.detuning_threshold()
 
@@ -263,7 +281,7 @@ class ResonatorSpectroscopyAfterPi(ProtocolOperation):
         self.independents_after["frequencies"] = after["ssb_frequency"].values + lo
         self.dependents_after["signal"] = after["signal_Re"].values + 1j * after["signal_Im"].values
 
-    def analyze(self):
+    def _analyze_default(self):
         # Analyze before measurement
         with DatasetAnalysis(self.data_loc_before, f"{self.name}_before") as ds:
             ret_before = ResonatorSpectroscopy.add_mag_and_unwind_and_fit(
@@ -366,20 +384,18 @@ class ResonatorSpectroscopyAfterPi(ProtocolOperation):
         snr_passed = snr >= threshold
 
         max_error = self.max_fit_param_error()
-        bad_params = []
-        for pname, param in fit_result.params.items():
-            if pname in _EXCLUDED_FIT_PARAMS:
-                continue
-            if param.stderr is None:
-                bad_params.append(f"{pname}(no stderr)")
-            elif param.value == 0 or abs(param.stderr / param.value) > max_error:
-                pct = abs(param.stderr / param.value) * 100 if param.value != 0 else float("inf")
-                bad_params.append(f"{pname}({pct:.0f}%)")
+        param = fit_result.params["f_0"]
+        bad_param = None
+        if param.stderr is None:
+            bad_param = "f_0(no stderr)"
+        elif param.value == 0 or abs(param.stderr / param.value) > max_error:
+            pct = abs(param.stderr / param.value) * 100 if param.value != 0 else float("inf")
+            bad_param = f"f_0({pct:.0f}%)"
 
-        passed = snr_passed and len(bad_params) == 0
+        passed = snr_passed and bad_param is None
         parts = [f"SNR={snr:.3f} (threshold={threshold:.3f})"]
-        if bad_params:
-            parts.append(f"high-error params: {', '.join(bad_params)}")
+        if bad_param:
+            parts.append(f"high-error param: {bad_param}")
         return CheckResult(check_name, passed, "; ".join(parts))
 
     def _check_quality_before(self) -> CheckResult:

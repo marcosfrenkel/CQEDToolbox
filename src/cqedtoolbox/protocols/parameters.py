@@ -496,6 +496,14 @@ class SaturationSpecDriveGain(ProtocolParameterBase):
         active_qubit = nestedAttributeFromString(self.params, "active.qubit")()
         return nestedAttributeFromString(self.params, f"{active_qubit}.pulses.const.gain")(value)
 
+    def _dummy_getter(self):
+        active_qubit = nestedAttributeFromString(self.params, "active.qubit")()
+        return nestedAttributeFromString(self.params, f"{active_qubit}.pulses.const.gain")()
+
+    def _dummy_setter(self, value):
+        active_qubit = nestedAttributeFromString(self.params, "active.qubit")()
+        return nestedAttributeFromString(self.params, f"{active_qubit}.pulses.const.gain")(value)
+    
     def _opx_getter(self):
         q = nestedAttributeFromString(self.params, "active.qubit")()
         return nestedAttributeFromString(self.params, f"{q}.pulses.long.amp")()
