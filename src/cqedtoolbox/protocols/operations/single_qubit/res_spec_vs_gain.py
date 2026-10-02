@@ -599,17 +599,17 @@ class ResonatorSpectroscopyVsGain(ProtocolOperation):
 
         result = super().correct(result)  # check table + success update (writes readout_gain)
 
-        if result.status == OperationStatus.SUCCESS:
-            gains = self.independents["gains"][0]
-            self.report_output.append("\n### Individual Gain Traces\n")
-            for i, (fig_path, g) in enumerate(zip(trace_figures, gains)):
-                validity = "valid" if self.trace_valid[i] else f"invalid ({self.trace_invalid_reasons[i]})"
-                self.report_output.extend([
-                    f"\n**Trace {i}: Gain = {g:.3f}**\n"
-                    f"- SNR: {self.snr_values[i]:.3f}\n"
-                    f"- f_0: {self.resonance_frequencies[i]:.3f} MHz\n"
-                    f"- Status: {validity}\n",
-                    fig_path,
-                ])
+        # Always show the per-trace fits: on a failed attempt they're what explains the failure.
+        gains = self.independents["gains"][0]
+        self.report_output.append("\n### Individual Gain Traces\n")
+        for i, (fig_path, g) in enumerate(zip(trace_figures, gains)):
+            validity = "valid" if self.trace_valid[i] else f"invalid ({self.trace_invalid_reasons[i]})"
+            self.report_output.extend([
+                f"\n**Trace {i}: Gain = {g:.3f}**\n"
+                f"- SNR: {self.snr_values[i]:.3f}\n"
+                f"- f_0: {self.resonance_frequencies[i]:.3f} MHz\n"
+                f"- Status: {validity}\n",
+                fig_path,
+            ])
 
         return result
